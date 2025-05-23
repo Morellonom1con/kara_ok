@@ -1,0 +1,15 @@
+{
+  "name": "kara_ok",
+  "version": "1.0.0",
+  "main": "lyrics_fetcher.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright": "^1.52.0"
+  },
+  "description": ""
+}
