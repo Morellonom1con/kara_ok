@@ -13,7 +13,10 @@ SONG_MP3=$(ls *.mp3 | head -n 1)
 SONG_NAME="${SONG_MP3%.mp3}"
 
 
-docker run --rm -v "$(pwd)":/audio researchdeezer/spleeter separate \
+docker run --rm \
+  -v "$(pwd)":/audio \
+  -v "$(pwd)/cache/model/2stems":/model/2stems \
+  researchdeezer/spleeter separate \
   -i "/audio/${SONG_MP3}" \
   -p spleeter:2stems \
   -o /audio/output
@@ -27,6 +30,12 @@ mv "$TRACK_ID.lrc" "${SONG_NAME}.lrc"
 
 
 ffmpeg -i "output/${SONG_NAME}/accompaniment.wav" \
-        -f lavfi -i color=c=black:s=1280x720 \
-        -vf "subtitles='output.lrc':force_style='Alignment=2'"\
-        -shortest "${SONG_NAME}_karaoke.mp4"
+       -f lavfi -i color=c=black:s=1280x720 \
+       -filter_complex "[0:a]avectorscope=mode=lissajous:draw=line:s=1280x720[vectorscope]" \
+        -map "[vectorscope]" -map 0:a \ 
+       -shortest "${SONG_NAME}_viz.mp4"
+
+
+ffmpeg -i "${SONG_NAME}_viz.mp4" \
+       -vf "subtitles='output.lrc'" \
+       -c:a copy -shortest "${SONG_NAME}_karaoke.mp4"
