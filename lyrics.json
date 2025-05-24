@@ -3,212 +3,146 @@
     "syncType": "LINE_SYNCED",
     "lines": [
       {
-        "startTimeMs": "25880",
-        "words": "Show me how you care",
+        "startTimeMs": "37500",
+        "words": "Spend some time away",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "31850",
+        "startTimeMs": "41430",
+        "words": "Getting ready for the day you're born again",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "48490",
         "words": "♪",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "37410",
-        "words": "Tell me how you loved before",
+        "startTimeMs": "52240",
+        "words": "Spend some time alone",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "46500",
+        "startTimeMs": "56060",
+        "words": "Understand that soon you'll run with better men",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "62290",
+        "words": "Alone again",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "65680",
+        "words": "Alone again",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "69300",
+        "words": "Alone again",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "73000",
+        "words": "Alone again, alone",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "79740",
         "words": "♪",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "49060",
-        "words": "Show me how you smile",
+        "startTimeMs": "110960",
+        "words": "No use looking out",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "55290",
+        "startTimeMs": "114640",
+        "words": "It's within that brings that lonely feeling",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "121820",
         "words": "♪",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "60550",
-        "words": "Tell me why your hands are cold",
+        "startTimeMs": "125690",
+        "words": "Understand that when you leave here",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "68560",
-        "words": "Show me how",
+        "startTimeMs": "129690",
+        "words": "You'll be clear among the better men",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "71520",
-        "words": "I'm turning around",
+        "startTimeMs": "135230",
+        "words": "Alone again",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "73950",
-        "words": "I'm having visions of you",
+        "startTimeMs": "138900",
+        "words": "Alone again",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "78830",
-        "words": "But then I understand",
+        "startTimeMs": "142560",
+        "words": "Alone again",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "83220",
-        "words": "The friend I'm dreaming of is far away",
+        "startTimeMs": "146290",
+        "words": "Alone again, alone",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "89740",
-        "words": "But I'm here",
+        "startTimeMs": "153570",
+        "words": "Alone again",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "92900",
-        "words": "I'm here",
+        "startTimeMs": "158290",
+        "words": "Alone again",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "96080",
-        "words": "♪",
+        "startTimeMs": "160950",
+        "words": "Alone again, alone",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "106700",
-        "words": "Show me how you're proud",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "113050",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "118410",
-        "words": "Tell me how you reach the moon",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "127190",
-        "words": "",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "129220",
-        "words": "My thoughts err away tonight",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "135520",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "140840",
-        "words": "My heart fell to love again",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "147110",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "149790",
-        "words": "Show me how",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "152480",
-        "words": "I'm turning around",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "154470",
-        "words": "I'm having visions of you",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "159660",
-        "words": "But then I understand",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "164400",
-        "words": "The friend I'm dreaming of is far away",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "171330",
-        "words": "And doesn't feel my love",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "176280",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "179040",
-        "words": "But I do",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "182080",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "185660",
-        "words": "I do",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "187080",
+        "startTimeMs": "165000",
         "words": "",
         "syllables": [],
         "endTimeMs": "0"
       }
     ],
     "provider": "MusixMatch",
-    "providerLyricsId": "81349202",
+    "providerLyricsId": "26452218",
     "providerDisplayName": "Musixmatch",
     "syncLyricsUri": "",
     "isDenseTypeface": false,
@@ -218,39 +152,39 @@
     "capStatus": "NONE",
     "previewLines": [
       {
-        "startTimeMs": "25880",
-        "words": "Show me how you care",
+        "startTimeMs": "37500",
+        "words": "Spend some time away",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "31850",
+        "startTimeMs": "41430",
+        "words": "Getting ready for the day you're born again",
+        "syllables": [],
+        "endTimeMs": "0"
+      },
+      {
+        "startTimeMs": "48490",
         "words": "♪",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "37410",
-        "words": "Tell me how you loved before",
+        "startTimeMs": "52240",
+        "words": "Spend some time alone",
         "syllables": [],
         "endTimeMs": "0"
       },
       {
-        "startTimeMs": "46500",
-        "words": "♪",
-        "syllables": [],
-        "endTimeMs": "0"
-      },
-      {
-        "startTimeMs": "49060",
-        "words": "Show me how you smile",
+        "startTimeMs": "56060",
+        "words": "Understand that soon you'll run with better men",
         "syllables": [],
         "endTimeMs": "0"
       }
     ]
   },
   "colors": {
-    "background": -10061435,
+    "background": -10389103,
     "text": -16777216,
     "highlightText": -1
   },

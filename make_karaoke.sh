@@ -32,10 +32,12 @@ mv "$TRACK_ID.lrc" "${SONG_NAME}.lrc"
 ffmpeg -i "output/${SONG_NAME}/accompaniment.wav" \
        -f lavfi -i color=c=black:s=1280x720 \
        -filter_complex "[0:a]avectorscope=mode=lissajous:draw=line:s=1280x720[vectorscope]" \
-        -map "[vectorscope]" -map 0:a \ 
-       -shortest "${SONG_NAME}_viz.mp4"
+       -map "[vectorscope]" -map 0:a \
+       -shortest "${SONG_NAME}_temp.mp4"
 
 
-ffmpeg -i "${SONG_NAME}_viz.mp4" \
+ffmpeg -i "${SONG_NAME}_temp.mp4" \
        -vf "subtitles='output.lrc'" \
        -c:a copy -shortest "${SONG_NAME}_karaoke.mp4"
+
+rm "${SONG_NAME}_temp.mp4"
