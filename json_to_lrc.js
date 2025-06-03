@@ -1,7 +1,6 @@
 const fs = require('fs');
 const path = require('path');
 
-// === Path to your JSON file ===
 const inputPath = './lyrics.json';
 const outputPath = './lyrics.lrc';
 
@@ -20,7 +19,7 @@ function jsonToLRC(json) {
 
   const lines = json.lyrics.lines;
   return lines
-    .filter(line => line.words.trim() !== '') // skip empty lines
+    .filter(line => line.words.trim() !== '')
     .map(line => {
       const timestamp = msToTimestamp(parseInt(line.startTimeMs));
       return `${timestamp}${line.words}`;

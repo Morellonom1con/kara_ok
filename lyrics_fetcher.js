@@ -13,7 +13,7 @@ const fs = require('fs');
     if (url.includes('/color-lyrics')) {
       try {
         const json = await response.json();
-        const path = './lyrics.json'; // or any path you prefer
+        const path = './lyrics.json';
         fs.writeFileSync(path, JSON.stringify(json, null, 2), 'utf-8');
         console.log(`📁 Lyrics JSON saved to ${path}`);
       } catch (e) {
