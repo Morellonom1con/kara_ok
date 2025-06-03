@@ -1,3 +1,11 @@
+slugify() {
+  echo "$1" | \
+    tr '[:upper:]' '[:lower:]' | \
+    sed -E 's/[^a-z0-9]+/-/g' | \
+    sed -E 's/^-+|-+$//g' | \
+    sed -E 's/-+/-/g'
+}
+
 SONG_URL="$1"
 
 if [ -z "$SONG_URL" ]; then
@@ -5,14 +13,24 @@ if [ -z "$SONG_URL" ]; then
     exit 1
 fi
 
-
+# 🧠 Let SpotDL do its thing first
 docker run --rm -v "$(pwd)":/music spotdl/spotify-downloader download "$SONG_URL"
 
+# 🎯 Grab the newest .mp3 file (assumes it's the one SpotDL just made)
+ORIG_MP3=$(find . -maxdepth 1 -type f -name "*.mp3" -printf "%T@ %p\n" | sort -n | tail -n 1 | cut -d' ' -f2-)
+ORIG_MP3="${ORIG_MP3#./}"
 
-SONG_MP3=$(ls *.mp3 | head -n 1)
-SONG_NAME="${SONG_MP3%.mp3}"
+# 🏷 Save original name for later steps (no slugify yet)
+RAW_NAME="${ORIG_MP3%.mp3}"
 
+# ✅ Only slugify for consistent processing after download
+SONG_NAME=$(slugify "$RAW_NAME")
+SONG_MP3="${SONG_NAME}.mp3"
 
+# Rename the original mp3 to slugified version
+mv "$ORIG_MP3" "$SONG_MP3"
+
+# 🔀 Run Spleeter
 docker run --rm \
   -v "$(pwd)":/audio \
   -v "$(pwd)/cache/model/2stems":/model/2stems \
@@ -21,23 +39,12 @@ docker run --rm \
   -p spleeter:2stems \
   -o /audio/output
 
+# 📝 Grab lyrics and convert to .lrc
 node lyrics_fetcher.js "$SONG_URL"
 node json_to_lrc.js
 
-TRACK_ID=$(python3 -c "from urllib.parse import urlparse; print(urlparse('$SONG_URL').path.split('/')[-1])")
-python3 lyrics_fetcher.py "$TRACK_ID" "$SPOTIFY_TOKEN"
-mv "$TRACK_ID.lrc" "${SONG_NAME}.lrc"
-
-
-ffmpeg -i "output/${SONG_NAME}/accompaniment.wav" \
-       -f lavfi -i color=c=black:s=1280x720 \
-       -filter_complex "[0:a]avectorscope=mode=lissajous:draw=line:s=1280x720[vectorscope]" \
-       -map "[vectorscope]" -map 0:a \
-       -shortest "${SONG_NAME}_temp.mp4"
-
-
-ffmpeg -i "${SONG_NAME}_temp.mp4" \
-       -vf "subtitles='output.lrc'" \
-       -c:a copy -shortest "${SONG_NAME}_karaoke.mp4"
-
-rm "${SONG_NAME}_temp.mp4"
+# 🎥 Generate karaoke video
+ffmpeg -f lavfi -i color=c=teal:s=1280x720:d=9999 \
+       -i "output/${SONG_NAME}/accompaniment.wav" \
+       -vf "subtitles='lyrics.lrc':force_style='Alignment=2,FontName=Arial,FontSize=36,PrimaryColour=&HFFFFFF&'" \
+       -shortest "${SONG_NAME}_karaoke.mp4"
