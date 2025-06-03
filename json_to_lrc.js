@@ -3,7 +3,7 @@ const path = require('path');
 
 // === Path to your JSON file ===
 const inputPath = './lyrics.json';
-const outputPath = './output.lrc';
+const outputPath = './lyrics.lrc';
 
 function msToTimestamp(ms) {
   const totalSeconds = Math.floor(ms / 1000);
