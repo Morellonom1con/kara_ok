@@ -1,7 +1,11 @@
-from PyQt5.QtWidgets import QApplication,QMainWindow,QPushButton,QFrame,QSlider,QLabel
-from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint
+from PyQt5.QtWidgets import QApplication,QMainWindow,QPushButton,QFrame,QSlider,QLabel,QOpenGLWidget
+from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer
 from PyQt5.QtGui import QPainter,QColor,QFont,QPolygon
+from OpenGL.GL import *
+import numpy as np
+from random import *
 import sys
+import time
 
 class TrapezoidButton(QPushButton):
     def __init__(self,parent=None):
@@ -34,12 +38,147 @@ class TrapezoidButton(QPushButton):
         else:
             painter.drawText(self.rect(),Qt.AlignCenter,"<")    
 
+class GLviewport(QOpenGLWidget):
+    def __init__(self,parent=None):
+        super().__init__(parent)
+        self.timer=QTimer(self)
+        self.timer.timeout.connect(self.update)
+        self.timer.start(16)
+        self.start_time=time.time()
+    def initializeGL(self):
+        glEnable(GL_DEPTH_TEST)
+        self.quad=np.array([
+            -1.0, -1.0,
+            1.0, -1.0,
+            -1.0,  1.0,
+            1.0,  1.0,
+        ],dtype=np.float32)
+        self.VAO=glGenVertexArrays(1)
+        self.VBO=glGenBuffers(1)
+        glBindVertexArray(self.VAO)
+        glBindBuffer(GL_ARRAY_BUFFER,self.VBO)
+        glBufferData(GL_ARRAY_BUFFER,self.quad.nbytes,self.quad,GL_STATIC_DRAW)
+        glEnableVertexAttribArray(0)
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, None)
+        self.vertshader_src = """#version 330 core
+        layout(location = 0) in vec2 aPos;
+        out vec2 uv;
+        void main()
+        {
+            gl_Position = vec4(aPos, 0.0, 1.0);
+            uv = aPos * 0.5 + 0.5;
+        }
+        """
+
+        self.fragshader_src = """#version 330 core
+        in vec2 uv;
+        out vec4 FragColor;
+
+        uniform vec2 u_resolution;
+        uniform float u_time;
+        uniform float u_spin_amount;
+        uniform float u_contrast;
+        uniform vec4 u_colour_1;
+        uniform vec4 u_colour_2;
+        uniform vec4 u_colour_3;
+
+        void main()
+        {
+            float spin_time = u_time;
+            float SPIN_EASE = 0.4;
+
+            vec2 screen_coords = uv * u_resolution;
+
+            vec2 pos = (screen_coords - 0.5 * u_resolution) / length(u_resolution) - vec2(0.0, 0.0);
+            float uv_len = length(pos);
+
+            float speed = (spin_time * SPIN_EASE * 0.2) + 302.2;
+            float angle = atan(pos.y, pos.x) + speed - SPIN_EASE * 20.0 * (u_spin_amount * uv_len + (1.0 - u_spin_amount));
+            vec2 mid = (u_resolution / length(u_resolution)) / 2.0;
+
+            pos = vec2(uv_len * cos(angle) + mid.x, uv_len * sin(angle) + mid.y) - mid;
+
+            // Paint swirl
+            pos *= 30.0;
+            speed = u_time * 2.0;
+            vec2 uv2 = vec2(pos.x + pos.y);
+
+            for (int i = 0; i < 5; ++i) {
+                uv2 += sin(max(pos.x, pos.y)) + pos;
+                pos += 0.5 * vec2(cos(5.1123314 + 0.353 * uv2.y + speed * 0.131121), sin(uv2.x - 0.113 * speed));
+                pos -= cos(pos.x + pos.y) - sin(pos.x * 0.711 - pos.y);
+            }
+
+            float contrast_mod = (0.25 * u_contrast + 0.5 * u_spin_amount + 1.2);
+            float paint_res = min(2.0, max(0.0, length(pos) * 0.035 * contrast_mod));
+            float c1p = max(0.0, 1.0 - contrast_mod * abs(1.0 - paint_res));
+            float c2p = max(0.0, 1.0 - contrast_mod * abs(paint_res));
+            float c3p = 1.0 - min(1.0, c1p + c2p);
+
+            vec4 col = (0.3 / u_contrast) * u_colour_1 +
+                    (1.0 - 0.3 / u_contrast) *
+                    (u_colour_1 * c1p + u_colour_2 * c2p + vec4(c3p * u_colour_3.rgb, c3p * u_colour_1.a));
+
+            FragColor = col;
+        }
+
+        """
+
+        vert =self.compile_shader(self.vertshader_src, GL_VERTEX_SHADER)
+        frag =self.compile_shader(self.fragshader_src, GL_FRAGMENT_SHADER)
+
+        self.shader_program = glCreateProgram()
+        glAttachShader(self.shader_program, vert)
+        glAttachShader(self.shader_program, frag)
+        glLinkProgram(self.shader_program)
+
+        glDeleteShader(vert)
+        glDeleteShader(frag)
+
+    def compile_shader(self,source, shader_type):
+        shader = glCreateShader(shader_type)
+        glShaderSource(shader, source)
+        glCompileShader(shader)
+
+        # Check for compile errors
+        if glGetShaderiv(shader, GL_COMPILE_STATUS) != GL_TRUE:
+            raise RuntimeError(glGetShaderInfoLog(shader).decode())
+        return shader
+
+    def paintGL(self):
+        glClearColor(0.0, 0.0, 0.0, 1.0)
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+
+        glUseProgram(self.shader_program)
+
+        # time and resolution
+        elapsed=time.time()-self.start_time
+        glUniform1f(glGetUniformLocation(self.shader_program, "u_time"), elapsed)
+        glUniform1f(glGetUniformLocation(self.shader_program, "u_spin_amount"), 0.6)
+        glUniform1f(glGetUniformLocation(self.shader_program, "u_contrast"),3)
+        glUniform2f(glGetUniformLocation(self.shader_program, "u_resolution"), self.width(), self.height())
+
+        # your 3 color inputs
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_1"), 0.5, 1.0, 0.9, 1.0)#outer color
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_2"), 0.1, 0.1, 0.1, 1.0)#center color
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_3"), 0.0, 0.2, 1.0, 1.0)#dominant middle color
+
+        glBindVertexArray(self.VAO)
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        glBindVertexArray(0)
+        glUseProgram(0)
+
+    def resizeGL(self, w, h):
+        pass
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Kara_ok")
         self.setGeometry(500,250,800,600)
+        
+        self.viewport=GLviewport(self)
 
         self.toggle_btn=TrapezoidButton(self)
         self.toggle_btn.move(self.width()-self.toggle_btn.width(),int(self.height()/2)-50)
@@ -88,6 +227,7 @@ class MainWindow(QMainWindow):
         self.menu_visible= not self.menu_visible
     
     def resizeEvent(self, event):
+        self.viewport.setGeometry(0,0,self.width(),self.height()-15)
         if self.menu_visible:
             self.side_menu.setGeometry(self.width() - self.menu_width, 0, self.menu_width, self.height())
             x = self.width() - self.menu_width - self.toggle_btn.width()
@@ -96,7 +236,7 @@ class MainWindow(QMainWindow):
             x = self.width() - self.toggle_btn.width()
 
         self.toggle_btn.move(x, int(self.height() / 2) - self.toggle_btn.height() // 2)
-
+        
         self.player_menu.setGeometry(0, self.height() - self.player_height, self.width(), self.player_height)
         self.play_slider.setGeometry(50,15,self.player_menu.width()-50-10-100,20)
         self.play_time.setGeometry(50+10+self.play_slider.width(),15,100,20)
