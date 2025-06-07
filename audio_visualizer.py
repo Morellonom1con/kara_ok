@@ -1,11 +1,53 @@
-from PyQt5.QtWidgets import QApplication,QMainWindow,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget
-from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QTime
+from PyQt5.QtWidgets import QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget
+from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QTime,Qt
 from PyQt5.QtGui import QPainter,QColor,QFont,QPolygon
 from PyQt5.QtMultimedia import QMediaPlayer,QMediaContent
 from OpenGL.GL import *
 import numpy as np
 import sys
 import time
+import soundcard as sc
+import os
+import subprocess
+
+def download_song(song_url):
+    current_dir = os.getcwd()
+
+    command = [
+        "docker", "run", "--rm",
+        "-v", f"{current_dir}:/music",
+        "spotdl/spotify-downloader",
+        "download", song_url
+    ]
+
+    try:
+        subprocess.run(command, check=True)
+        print("✅ Download complete!")
+    except subprocess.CalledProcessError as e:
+        print("❌ Error during download:", e)
+
+
+if sys.platform.startswith("linux"):
+    wayland_display = os.environ.get("WAYLAND_DISPLAY")
+    if wayland_display:
+        os.environ["QT_QPA_PLATFORM"] = "wayland"
+    else:
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
+samplerate = 48000
+blocksize = 1024
+
+# Get loopback mic for system audio
+loopback = sc.get_microphone(sc.default_speaker().name, include_loopback=True)
+
+# Global recorder
+mic = loopback.recorder(samplerate=samplerate, blocksize=blocksize)
+mic.__enter__()  # Manually enter context
+
+def get_volume():
+    data = mic.record(numframes=blocksize)
+    return np.linalg.norm(data)
+
 
 class TrapezoidButton(QPushButton):
     def __init__(self,parent=None):
@@ -54,7 +96,12 @@ class GLviewport(QOpenGLWidget):
         self.timer.timeout.connect(self.update)
         self.timer.start(16)
         self.start_time=time.time()
+        self.prev_volume = 0.0
+
     def initializeGL(self):
+        if not self.context().isValid():
+            print("OpenGL context is not valid!")
+            return
         glEnable(GL_DEPTH_TEST)
         self.quad=np.array([
             -1.0, -1.0,
@@ -83,6 +130,7 @@ class GLviewport(QOpenGLWidget):
         in vec2 uv;
         out vec4 FragColor;
 
+        uniform float u_volume;
         uniform vec2 u_resolution;
         uniform float u_time;
         uniform float u_spin_amount;
@@ -91,10 +139,16 @@ class GLviewport(QOpenGLWidget):
         uniform vec4 u_colour_2;
         uniform vec4 u_colour_3;
 
+
+        float sigmoid(float x) 
+        {
+            return 1.0 / (1.0 + exp(-x));
+        }
+
         void main()
         {
             float spin_time = u_time;
-            float SPIN_EASE = 0.4; // controlls strength of swirl  
+            float SPIN_EASE = 0.4; // controls strength of swirl  
 
             vec2 screen_coords = uv * u_resolution; // to scale properly
 
@@ -103,7 +157,7 @@ class GLviewport(QOpenGLWidget):
 
             float speed = (spin_time * SPIN_EASE * 0.2) + 302.2;
             float angle = atan(pos.y, pos.x) + speed - SPIN_EASE * 20.0 * (u_spin_amount * uv_len + (1.0 - u_spin_amount));
-            vec2 mid = (u_resolution / length(u_resolution)) / 2.0;
+            vec2 mid = (u_resolution / length(u_resolution)) / 2;
 
             pos = vec2(uv_len * cos(angle) + mid.x, uv_len * sin(angle) + mid.y) - mid;
 
@@ -114,11 +168,11 @@ class GLviewport(QOpenGLWidget):
 
             for (int i = 0; i < 5; ++i) {
                 uv2 += sin(max(pos.x, pos.y)) + pos;
-                pos += 0.5 * vec2(cos(5.1123314 + 0.353 * uv2.y + speed * 0.131121), sin(uv2.x - 0.113 * speed));
-                pos -= cos(pos.x + pos.y) - sin(pos.x * 0.711 - pos.y);
+                pos += 0.5 * vec2(cos(5.1123314 + 0.353 * uv2.y + speed * 0.131121), sin(uv2.x- 0.113 * speed));
+                pos -= cos(pos.x + pos.y) - sin(pos.x * 0.711  - pos.y);
             }
 
-            float contrast_mod = (0.25 * u_contrast + 0.5 * u_spin_amount + 1.2);
+            float contrast_mod = (0.25 * u_contrast + 0.5 * u_spin_amount + 1.2+pow(1.08,u_volume)/8);
             float paint_res = min(2.0, max(0.0, length(pos) * 0.035 * contrast_mod));
             float c1p = max(0.0, 1.0 - contrast_mod * abs(1.0 - paint_res));
             float c2p = max(0.0, 1.0 - contrast_mod * abs(paint_res));
@@ -140,7 +194,7 @@ class GLviewport(QOpenGLWidget):
         glAttachShader(self.shader_program, vert)
         glAttachShader(self.shader_program, frag)
         glLinkProgram(self.shader_program)
-
+    
         glDeleteShader(vert)
         glDeleteShader(frag)
 
@@ -149,7 +203,6 @@ class GLviewport(QOpenGLWidget):
         glShaderSource(shader, source)
         glCompileShader(shader)
 
-        # Check for compile errors
         if glGetShaderiv(shader, GL_COMPILE_STATUS) != GL_TRUE:
             raise RuntimeError(glGetShaderInfoLog(shader).decode())
         return shader
@@ -162,15 +215,21 @@ class GLviewport(QOpenGLWidget):
 
         # time and resolution
         elapsed=time.time()-self.start_time
+        raw_volume = get_volume()
+        alpha=0.5
+        smoothed = (1 - alpha) * self.prev_volume + alpha * raw_volume
+        self.prev_volume = smoothed  # Store for next frame
+        
+        glUniform1f(glGetUniformLocation(self.shader_program, "u_volume"), smoothed)
         glUniform1f(glGetUniformLocation(self.shader_program, "u_time"), elapsed)
         glUniform1f(glGetUniformLocation(self.shader_program, "u_spin_amount"), 0.6)
-        glUniform1f(glGetUniformLocation(self.shader_program, "u_contrast"),3)
+        glUniform1f(glGetUniformLocation(self.shader_program, "u_contrast"),2)
         glUniform2f(glGetUniformLocation(self.shader_program, "u_resolution"), self.width(), self.height())
 
-        # your 3 color inputs
-        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_1"), 0.5, 1.0, 0.7, 1.0)#outer color
-        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_2"), 0.1, 0.1, 0.1, 1.0)#center color
-        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_3"), 0.0, 0.2, 0.9, 1.0)#dominant middle color
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_1"), 0.2, 1.0, 0.7, 1.0)
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_2"), 0.1, 0.1, 0.1, 1.0)
+        glUniform4f(glGetUniformLocation(self.shader_program, "u_colour_3"), 0.0, 0.2, 0.7, 1.0)
+
 
         glBindVertexArray(self.VAO)
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
@@ -196,11 +255,23 @@ class MainWindow(QMainWindow):
         self.toggle_btn=TrapezoidButton(self)
         self.toggle_btn.move(self.width()-self.toggle_btn.width(),int(self.height()/2)-50)
         self.toggle_btn.clicked.connect(self.toggle_menu)
+        self.toggle_btn.raise_()
 
-        self.menu_width=200
+        self.lyric_window=QLabel(self)
+        self.lyric_window.setText("Lyrics go here")
+        self.lyric_window.setAlignment(Qt.AlignCenter)
+        self.lyric_window.setWordWrap(True)
+
+        self.menu_width=300
         self.side_menu=QFrame(self)
         self.side_menu.setGeometry(self.width(),0,self.menu_width,self.height())
         self.side_menu.setStyleSheet("background-color: #444;")
+        
+        self.add_button=QPushButton(self.side_menu)
+        self.add_button.setText("+")
+        self.link_field=QLineEdit(self.side_menu)
+        self.link_field.setStyleSheet("background-color:white;")
+        self.add_button.clicked.connect(self.toggle_add_menu)
 
         self.player_menu=QFrame(self)
 
@@ -283,6 +354,9 @@ class MainWindow(QMainWindow):
         else:
             self.music_player.play()
             self.play_button.setText("⏸")
+
+    def toggle_add_menu():
+        pass
             
     def on_duration_change(self, dur):
         self.player_duration = QTime(0, 0).addMSecs(dur)
@@ -338,10 +412,14 @@ class MainWindow(QMainWindow):
         self.player_menu.setGeometry(0, self.height() - self.player_height, self.width(), self.player_height)
         self.play_slider.setGeometry(50,15,self.player_menu.width()-50-10-100-40,20)
         self.play_time.setGeometry(50+10+self.play_slider.width(),15,100,20)
-
+        self.lyric_window.setGeometry((self.width() - int(self.width() * 2 / 3)) // 2,int((self.height()-self.player_height) / 4),int(self.width() * 2 / 3),int(self.height() / 2))
+        self.lyric_window.setStyleSheet(f"color:white;font-size:{int(self.height()/8)}px;")
         self.volume_button.move(self.width() - 40, 10)
         self.volume_slider_frame.move(self.width() - 42, self.player_menu.y() - 123)
-
+        self.toggle_btn.raise_()   
+        self.add_button.setGeometry(250,0,50,25)   
+        self.add_button.setStyleSheet("color:white;")
+        self.link_field.setGeometry(0,0,250,25)
         super().resizeEvent(event)
 
 
