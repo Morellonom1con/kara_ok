@@ -27,17 +27,13 @@ SONG_MP3="${SONG_NAME}.mp3"
 mv "$ORIG_MP3" "$SONG_MP3"
 
 docker run --rm \
+  -u $(id -u):$(id -g) \
   -v "$(pwd)":/audio \
   -v "$(pwd)/cache/model/2stems":/model/2stems \
   researchdeezer/spleeter separate \
   -i "/audio/${SONG_MP3}" \
   -p spleeter:2stems \
-  -o /audio/output
+  -o /audio/current_queue
 
 node lyrics_fetcher.js "$SONG_URL"
 node json_to_lrc.js
-
-ffmpeg -f lavfi -i color=c=teal:s=1280x720:d=9999 \
-       -i "output/${SONG_NAME}/accompaniment.wav" \
-       -vf "subtitles='lyrics.lrc':force_style='Alignment=2,FontName=Arial,FontSize=36,PrimaryColour=&HFFFFFF&'" \
-       -shortest "${SONG_NAME}_karaoke.mp4"
