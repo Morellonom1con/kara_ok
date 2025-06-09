@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget
-from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QTime,Qt
+from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QTime,Qt,QRunnable, QThreadPool, pyqtSlot
 from PyQt5.QtGui import QPainter,QColor,QFont,QPolygon
 from PyQt5.QtMultimedia import QMediaPlayer,QMediaContent
 from OpenGL.GL import *
@@ -10,21 +10,50 @@ import soundcard as sc
 import os
 import subprocess
 
-def download_song(song_url):
-    current_dir = os.getcwd()
+class SongDownloader(QRunnable):
+    def __init__(self, song_url, max_retries=3):
+        super().__init__()
+        self.song_url = song_url
+        self.max_retries = max_retries
 
-    command = [
-        "docker", "run", "--rm",
-        "-v", f"{current_dir}:/music",
-        "spotdl/spotify-downloader",
-        "download", song_url
-    ]
+    @pyqtSlot()
+    def run(self):
+        current_dir = os.getcwd()
 
-    try:
-        subprocess.run(command, check=True)
-        print("✅ Download complete!")
-    except subprocess.CalledProcessError as e:
-        print("❌ Error during download:", e)
+        download_command = [
+            "docker", "run", "--rm",
+            "-v", f"{current_dir}:/music",
+            "spotdl/spotify-downloader",
+            "download", self.song_url
+        ]
+
+        # STEP 1: Try downloading song with retries
+        attempts = 0
+        while attempts < self.max_retries:
+            try:
+                print(f"📦 Attempt {attempts + 1} to download song...")
+                subprocess.run(download_command, check=True)
+                print("✅ Download complete!")
+                break
+            except subprocess.CalledProcessError as e:
+                attempts += 1
+                print(f"⚠️ Attempt {attempts} failed: {e}")
+                if attempts >= self.max_retries:
+                    print("❌ All download attempts failed. Giving up.")
+                    return
+
+        # STEP 2: Fetch lyrics using Node
+        print("🎶 Fetching lyrics...")
+        subprocess.run(["node", "lyrics_fetcher.js", self.song_url], check=True)
+        print("✅ Lyrics fetched!")
+
+        # STEP 3: Convert to LRC
+        try:
+            print("🛠️ Converting to LRC...")
+            subprocess.run(["node", "json_to_lrc.js"], check=True)
+            print("✅ LRC file generated!")
+        except subprocess.CalledProcessError as e:
+            print("❌ Failed to convert lyrics to LRC:", e)
 
 
 if sys.platform.startswith("linux"):
@@ -37,12 +66,10 @@ if sys.platform.startswith("linux"):
 samplerate = 48000
 blocksize = 1024
 
-# Get loopback mic for system audio
 loopback = sc.get_microphone(sc.default_speaker().name, include_loopback=True)
 
-# Global recorder
 mic = loopback.recorder(samplerate=samplerate, blocksize=blocksize)
-mic.__enter__()  # Manually enter context
+mic.__enter__()  
 
 def get_volume():
     data = mic.record(numframes=blocksize)
@@ -271,7 +298,7 @@ class MainWindow(QMainWindow):
         self.add_button.setText("+")
         self.link_field=QLineEdit(self.side_menu)
         self.link_field.setStyleSheet("background-color:white;")
-        self.add_button.clicked.connect(self.toggle_add_menu)
+        self.add_button.clicked.connect(self.on_add)
 
         self.player_menu=QFrame(self)
 
@@ -345,6 +372,12 @@ class MainWindow(QMainWindow):
         self.menu_anim.setDuration(150)
         
         self.menu_visible=False
+        self.threadpool = QThreadPool()
+
+    def start_download(self,song_url):
+        downloader = SongDownloader(song_url)
+        self.threadpool.start(downloader)
+
 
     def toggle_play(self):
         self.isplaying=not (self.isplaying)
@@ -355,8 +388,8 @@ class MainWindow(QMainWindow):
             self.music_player.play()
             self.play_button.setText("⏸")
 
-    def toggle_add_menu():
-        pass
+    def on_add(self):
+        self.start_download(self.side_menu.findChildren(QLineEdit)[0].text())
             
     def on_duration_change(self, dur):
         self.player_duration = QTime(0, 0).addMSecs(dur)
