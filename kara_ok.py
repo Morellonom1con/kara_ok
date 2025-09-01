@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget
-from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QTime,Qt,QRunnable, QThreadPool, pyqtSlot
+from PyQt5.QtWidgets import QMenu,QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget,QListWidget,QListWidgetItem,QProgressBar
+from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QObject,QTime,Qt,QRunnable, QThreadPool, pyqtSlot,pyqtSignal
 from PyQt5.QtGui import QPainter,QColor,QFont,QPolygon
 from PyQt5.QtMultimedia import QMediaPlayer,QMediaContent
 from OpenGL.GL import *
@@ -8,52 +8,114 @@ import sys
 import time
 import soundcard as sc
 import os
+from pathlib import Path
 import subprocess
+import shutil
+
+
+import os, subprocess, time
+from PyQt5.QtCore import QRunnable, pyqtSlot
+
+class SongDownloaderSignals(QObject):
+    finished = pyqtSignal(str, str, str)  # title, wav_path, lrc_path
+    error = pyqtSignal(str)
 
 class SongDownloader(QRunnable):
-    def __init__(self, song_url, max_retries=3):
+    def __init__(self, song_url: str, max_retries: int = 3):
         super().__init__()
         self.song_url = song_url
         self.max_retries = max_retries
+        self.signals = SongDownloaderSignals()
 
     @pyqtSlot()
     def run(self):
         current_dir = os.getcwd()
+        Path(current_dir, "cache", "model", "2stems").mkdir(parents=True, exist_ok=True)
+        Path(current_dir, "current_queue").mkdir(exist_ok=True)
 
-        download_command = [
-            "docker", "run", "--rm",
-            "-v", f"{current_dir}:/music",
-            "spotdl/spotify-downloader",
-            "download", self.song_url
-        ]
+        # STEP 0 ── fetch lyrics
+        lyr_proc = subprocess.run([
+            "node", "lyrics_fetcher.js", self.song_url
+        ], check=False)
 
-        # STEP 1: Try downloading song with retries
-        attempts = 0
-        while attempts < self.max_retries:
-            try:
-                print(f"📦 Attempt {attempts + 1} to download song...")
-                subprocess.run(download_command, check=True)
-                print("✅ Download complete!")
-                break
-            except subprocess.CalledProcessError as e:
-                attempts += 1
-                print(f"⚠️ Attempt {attempts} failed: {e}")
-                if attempts >= self.max_retries:
-                    print("❌ All download attempts failed. Giving up.")
-                    return
+        if lyr_proc.returncode == 2:
+            self.signals.error.emit("🫥 No lyrics available for this track.")
+            return
+        if lyr_proc.returncode != 0:
+            print("💥 Warning: lyrics_fetcher crashed but continuing since JSON likely exists.")
 
-        # STEP 2: Fetch lyrics using Node
-        print("🎶 Fetching lyrics...")
-        subprocess.run(["node", "lyrics_fetcher.js", self.song_url], check=True)
-        print("✅ Lyrics fetched!")
-
-        # STEP 3: Convert to LRC
+        # Convert JSON ➜ LRC
         try:
-            print("🛠️ Converting to LRC...")
             subprocess.run(["node", "json_to_lrc.js"], check=True)
-            print("✅ LRC file generated!")
-        except subprocess.CalledProcessError as e:
-            print("❌ Failed to convert lyrics to LRC:", e)
+        except subprocess.CalledProcessError:
+            self.signals.error.emit("❌ Unable to convert JSON to LRC.")
+            return
+
+        # Save list of MP3s before
+        prev_mp3s = set(f for f in os.listdir(current_dir) if f.lower().endswith(".mp3"))
+
+        # Retry logic for downloading
+        download_success = False
+        for attempt in range(1, self.max_retries + 1):
+            print(f"📥 Download attempt {attempt}")
+            try:
+                subprocess.run([
+                "spotdl", self.song_url
+                ], cwd=current_dir, check=True)
+            except subprocess.CalledProcessError:
+                continue
+
+            # Check if a new MP3 has appeared
+            new_mp3s = set(f for f in os.listdir(current_dir) if f.lower().endswith(".mp3"))
+            diff = new_mp3s - prev_mp3s
+            if diff:
+                song_mp3 = diff.pop()
+                download_success = True
+                break
+            time.sleep(1)
+
+        if not download_success:
+            self.signals.error.emit("❌ Download attempts failed.")
+            return
+
+        song_title = Path(song_mp3).stem
+
+        # move LRC to unique file
+        # Count existing numbered folders in queue
+        queue_dir = Path(current_dir) / "current_queue"
+        counter = sum(1 for f in queue_dir.iterdir() if f.is_dir()) + 1
+        target_dir = queue_dir / str(counter)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Move lyrics.lrc
+        src_lrc = Path(current_dir) / "lyrics.lrc"
+        dest_lrc = target_dir / "lyrics.lrc"
+        if src_lrc.exists():
+            src_lrc.rename(dest_lrc)
+        else:
+            dest_lrc = ""
+
+        # Move original MP3
+        src_mp3 = Path(current_dir)/song_mp3
+        dest_mp3 = target_dir/"original.mp3"
+        src_mp3.rename(dest_mp3)
+
+        # Run spleeter to split vocals + accompaniment into target_dir
+        spleeter_cmd = [
+            "python", "-m", "spleeter", "separate",
+            "-p", "spleeter:2stems",
+            "-o", str(target_dir),
+            str(dest_mp3)
+        ]
+        try:
+            subprocess.run(spleeter_cmd,check=True)
+        except subprocess.CalledProcessError:
+            self.signals.error.emit("❌ Spleeter failed.")
+            return
+
+        wav_path = str(target_dir / "original"/"accompaniment.wav")
+        self.signals.finished.emit(str(counter), wav_path, str(dest_lrc))
+
 
 
 if sys.platform.startswith("linux"):
@@ -114,7 +176,6 @@ class ClickableSlider(QSlider):
             self.setValue(val)
             self.sliderMoved.emit(val)
         super().mousePressEvent(event)
-
 
 class GLviewport(QOpenGLWidget):
     def __init__(self,parent=None):
@@ -272,13 +333,16 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Kara_ok")
         self.setGeometry(500,250,800,600)
-        
+
+        self.lyrics = []  # Store list of (time_ms, text)
+        self.current_lyric_index = 0
+        self.music_queue = []
+        self.threadpool = QThreadPool()
         self.viewport=GLviewport(self)
         self.music_player=QMediaPlayer(self)
         self.music_player.setVolume(50)
-        self.music_player.setMedia(QMediaContent(QUrl.fromLocalFile("/home/bhargav/Downloads/Syn Cole - Feel Good.mp3")))
-
-
+        self.music_player.positionChanged.connect(self.update_lyrics)
+       
         self.toggle_btn=TrapezoidButton(self)
         self.toggle_btn.move(self.width()-self.toggle_btn.width(),int(self.height()/2)-50)
         self.toggle_btn.clicked.connect(self.toggle_menu)
@@ -299,6 +363,13 @@ class MainWindow(QMainWindow):
         self.link_field=QLineEdit(self.side_menu)
         self.link_field.setStyleSheet("background-color:white;")
         self.add_button.clicked.connect(self.on_add)
+
+        self.progress_bar = QProgressBar(self.side_menu)
+        self.progress_bar.setRange(0, 0)  # indeterminate
+        self.progress_bar.hide()
+
+        self.queue_list = QListWidget(self.side_menu)
+        self.queue_list.itemClicked.connect(self.load_from_queue)
 
         self.player_menu=QFrame(self)
 
@@ -373,11 +444,93 @@ class MainWindow(QMainWindow):
         
         self.menu_visible=False
         self.threadpool = QThreadPool()
+        self.sync_queue_from_disk()
 
-    def start_download(self,song_url):
+    def sync_queue_from_disk(self):
+        self.queue_list.clear()
+        self.music_queue.clear()
+        
+        queue_dir = Path(os.getcwd()) / "current_queue"
+        if not queue_dir.exists():
+            return
+        
+        for folder in sorted(queue_dir.iterdir(), key=lambda x: int(x.name)):
+            if not folder.is_dir():
+                continue
+            wav_path = folder / "original" / "accompaniment.wav"
+            lrc_path = folder / "lyrics.lrc"
+            if not wav_path.exists():
+                continue
+
+            title = folder.name
+            item = QListWidgetItem(title)
+            item.setData(Qt.UserRole, (str(wav_path), str(lrc_path), str(folder)))
+            self.queue_list.addItem(item)
+            self.music_queue.append({"title": title, "wav": str(wav_path), "lrc": str(lrc_path)})
+
+    def start_download(self, song_url):
+        if not song_url:
+            return
         downloader = SongDownloader(song_url)
+        downloader.signals.finished.connect(self.on_download_complete)
+        downloader.signals.error.connect(self.on_download_error)
         self.threadpool.start(downloader)
+        self.progress_bar.show()
 
+    def on_download_error(self, msg):
+        print(msg)
+        self.progress_bar.hide()
+
+    def on_download_complete(self, title, wav_path, lrc_path):
+        self.progress_bar.hide()
+        item = QListWidgetItem(title)
+        item.setData(Qt.UserRole, (wav_path, lrc_path))
+        self.queue_list.addItem(item)
+        self.music_queue.append({"title": title, "wav": wav_path, "lrc": lrc_path})
+        print(f"✅ Added '{title}' to queue.")
+
+    def update_lyrics(self, pos):
+        if not self.lyrics:
+            return
+
+        # Handle backward scrubbing by resetting index
+        while self.current_lyric_index > 0 and self.lyrics[self.current_lyric_index][0] > pos:
+            self.current_lyric_index -= 1
+
+        # Move forward if needed
+        while (self.current_lyric_index + 1 < len(self.lyrics) and
+               self.lyrics[self.current_lyric_index + 1][0] <= pos):
+            self.current_lyric_index += 1
+
+        lyric_line = self.lyrics[self.current_lyric_index][1]
+        self.lyric_window.setText(lyric_line)
+
+    def load_from_queue(self, item):
+        wav_path, lrc_path,_ = item.data(Qt.UserRole)
+        self.music_player.setMedia(QMediaContent(QUrl.fromLocalFile(wav_path)))
+
+        self.lyrics.clear()
+        self.current_lyric_index = 0
+
+        try:
+            with open(lrc_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("[") and "]" in line:
+                        parts = line.strip().split("]")
+                        for i in range(len(parts) - 1):
+                            timestamp = parts[i][1:]
+                            lyric_text = parts[-1]
+                            time_parts = timestamp.split(":")
+                            if len(time_parts) == 2:
+                                minutes = int(time_parts[0])
+                                seconds = float(time_parts[1])
+                                time_ms = int((minutes * 60 + seconds) * 1000)
+                                self.lyrics.append((time_ms, lyric_text))
+            self.lyrics.sort()
+        except FileNotFoundError:
+            self.lyric_window.setText("Lyrics not found.")
+
+        self.music_player.play()
 
     def toggle_play(self):
         self.isplaying=not (self.isplaying)
@@ -390,6 +543,7 @@ class MainWindow(QMainWindow):
 
     def on_add(self):
         self.start_download(self.side_menu.findChildren(QLineEdit)[0].text())
+        self.start_download(self.link_field.text())
             
     def on_duration_change(self, dur):
         self.player_duration = QTime(0, 0).addMSecs(dur)
@@ -450,10 +604,27 @@ class MainWindow(QMainWindow):
         self.volume_button.move(self.width() - 40, 10)
         self.volume_slider_frame.move(self.width() - 42, self.player_menu.y() - 123)
         self.toggle_btn.raise_()   
-        self.add_button.setGeometry(250,0,50,25)   
-        self.add_button.setStyleSheet("color:white;")
-        self.link_field.setGeometry(0,0,250,25)
+        self.link_field.setGeometry(0, 0, 250, 25)
+        self.add_button.setGeometry(255, 0, 40, 25)
+        self.progress_bar.setGeometry(0, 30, 295, 10)
+        self.queue_list.setGeometry(0, 45, 295, self.height() - 45)
         super().resizeEvent(event)
+
+
+    def contextMenuEvent(self, event):
+        item = self.queue_list.itemAt(self.queue_list.mapFromGlobal(event.globalPos()))
+        if item:
+            menu = QMenu(self)
+            delete_action = menu.addAction("Delete from Queue")
+            action = menu.exec_(event.globalPos())
+            if action == delete_action:
+                _, _, folder_path = item.data(Qt.UserRole)
+                try:
+                    shutil.rmtree(folder_path)
+                    print(f"🗑️ Deleted {folder_path}")
+                except Exception as e:
+                    print(f"❌ Could not delete: {e}")
+                self.sync_queue_from_disk()
 
 
 app=QApplication(sys.argv)

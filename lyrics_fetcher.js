@@ -2,54 +2,46 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 
 async function main() {
-  const browser = await chromium.launch({ headless: false });
+  const songUrl = process.argv[2];
+  const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ storageState: 'spotify-session.json' });
   const page = await context.newPage();
 
-  let lyricsCaptured = false;
+  let foundLyrics = false;
 
   page.on('response', async (response) => {
     const url = response.url();
-    if (url.includes('/color-lyrics') && !lyricsCaptured) {
-      lyricsCaptured = true;
-      const json = await response.json();
-      fs.writeFileSync('./lyrics.json', JSON.stringify(json, null, 2), 'utf-8');
-      console.log(`📁 Lyrics JSON saved to ./lyrics.json`);
-      await browser.close();
-      return;
+    if (url.includes('/color-lyrics') && !foundLyrics) {
+      try {
+        const json = await response.json();
+        if (!json?.lyrics?.lines?.length) {
+          console.log("🫥 No lyrics found for this track.");
+          await browser.close();
+          process.exit(2);
+        }
+        foundLyrics = true;
+        fs.writeFileSync('./lyrics.json', JSON.stringify(json, null, 2), 'utf-8');
+        console.log("📁 Lyrics JSON saved to ./lyrics.json");
+        await browser.close();
+        process.exit(0);
+      } catch (e) {
+        console.error("❌ Failed to parse lyrics JSON:", e.message);
+        await browser.close();
+        process.exit(1);
+      }
     }
   });
 
-  const songUrl = process.argv[2];
   await page.goto(songUrl, { waitUntil: 'domcontentloaded' });
-
-  if (lyricsCaptured) return;
-
   await page.waitForTimeout(7000);
-  if (lyricsCaptured) return;
-
-  console.log("Reloading page to trigger lyrics");
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  if (lyricsCaptured) return;
-
-  await page.waitForTimeout(5000);
-  if (lyricsCaptured) return;
-
-  const lyricsButton = await page.$('button[aria-label*="Lyrics"]');
-  if (lyricsButton && !lyricsCaptured) {
-    await lyricsButton.click();
-    await page.waitForTimeout(2000);
-  }
-
-  let timeout = 0;
-  while (!lyricsCaptured && timeout < 20000) {
-    await page.waitForTimeout(1000);
-    timeout += 1000;
-  }
-
-  if (!lyricsCaptured) {
+  if (!foundLyrics) {
+    console.log("❌ Lyrics not found after timeout.");
     await browser.close();
+    process.exit(1);
   }
 }
 
-main().catch(() => {}); 
+main().catch(err => {
+  console.error("💥 Unexpected crash in lyrics fetcher:", err);
+  process.exit(1);
+});
