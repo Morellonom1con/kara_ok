@@ -16,3 +16,6 @@ python3 kara_ok.py
 ### Ensure the song you're using has lyrics on spotify
 
 the split stem audio files can be found in /output in the kara_ok directory
+
+
+***above usage doesn't work anymore,working on a native audio visualizer with floating lyrics***
