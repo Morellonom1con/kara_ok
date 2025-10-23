@@ -102,7 +102,7 @@ class SongDownloader(QRunnable):
 
         # Run spleeter to split vocals + accompaniment into target_dir
         spleeter_cmd = [
-            "python", "-m", "spleeter", "separate",
+            "python3", "-m", "spleeter", "separate",
             "-p", "spleeter:2stems",
             "-o", str(target_dir),
             str(dest_mp3)
@@ -484,7 +484,8 @@ class MainWindow(QMainWindow):
     def on_download_complete(self, title, wav_path, lrc_path):
         self.progress_bar.hide()
         item = QListWidgetItem(title)
-        item.setData(Qt.UserRole, (wav_path, lrc_path))
+        folder_path = str(Path(wav_path).parent.parent)
+        item.setData(Qt.UserRole, (wav_path, lrc_path, folder_path))
         self.queue_list.addItem(item)
         self.music_queue.append({"title": title, "wav": wav_path, "lrc": lrc_path})
         print(f"✅ Added '{title}' to queue.")
@@ -506,7 +507,7 @@ class MainWindow(QMainWindow):
         self.lyric_window.setText(lyric_line)
 
     def load_from_queue(self, item):
-        wav_path, lrc_path,_ = item.data(Qt.UserRole)
+        wav_path, lrc_path, _ = item.data(Qt.UserRole)
         self.music_player.setMedia(QMediaContent(QUrl.fromLocalFile(wav_path)))
 
         self.lyrics.clear()
@@ -542,7 +543,6 @@ class MainWindow(QMainWindow):
             self.play_button.setText("⏸")
 
     def on_add(self):
-        self.start_download(self.side_menu.findChildren(QLineEdit)[0].text())
         self.start_download(self.link_field.text())
             
     def on_duration_change(self, dur):
