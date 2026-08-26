@@ -1,6 +1,24 @@
+# Direct dependencies of kara_ok.py
 PyQt5==5.15.11
 PyOpenGL==3.1.10
 numpy==1.23.5
 SoundCard==0.4.5
 SpotiFLAC==3.0.9
-spleeter==2.4.2
+
+# --- spleeter's runtime dependencies, supplied manually ---
+# spleeter 2.4.2 declares `httpx[http2]>=0.19.0,<0.20.0` and `tensorflow==2.12.1`.
+# Neither is usable here:
+#   * SpotiFLAC requires httpx>=0.27.0, which is a hard conflict, and
+#   * this project is known to work on tensorflow 2.10.1.
+# kara_ok only ever invokes spleeter as `python -m spleeter separate`, which
+# works fine against both. So spleeter is installed with --no-deps (see README)
+# and the deps it actually needs are pinned here instead.
+tensorflow==2.10.1
+tensorflow-io-gcs-filesystem==0.32.0
+ffmpeg-python>=0.2.0,<0.3.0
+norbert>=0.2.1,<0.3.0
+pandas>=1.3.0,<2.0.0
+typer>=0.3.2,<0.4.0
+
+# Then, as a second step:
+#     pip install --no-deps spleeter==2.4.2
