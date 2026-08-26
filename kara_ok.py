@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QMenu,QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget,QListWidget,QListWidgetItem,QProgressBar
+from PyQt5.QtWidgets import QMenu,QActionGroup,QApplication,QMainWindow,QLineEdit,QPushButton,QStyle,QFrame,QSlider,QLabel,QOpenGLWidget,QListWidget,QListWidgetItem,QProgressBar
 from PyQt5.QtCore import Qt,QPropertyAnimation,QPoint,QTimer,QUrl,QObject,QTime,Qt,QRunnable, QThreadPool, pyqtSlot,pyqtSignal
 from PyQt5.QtGui import QPainter,QColor,QFont,QPolygon
 from PyQt5.QtMultimedia import QMediaPlayer,QMediaContent
@@ -11,10 +11,9 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+from SpotiFLAC import SpotiFLAC
 
 
-import os, subprocess, time
-from PyQt5.QtCore import QRunnable, pyqtSlot
 
 class SongDownloaderSignals(QObject):
     finished = pyqtSignal(str, str, str)  # title, wav_path, lrc_path
@@ -30,7 +29,6 @@ class SongDownloader(QRunnable):
     @pyqtSlot()
     def run(self):
         current_dir = os.getcwd()
-        Path(current_dir, "cache", "model", "2stems").mkdir(parents=True, exist_ok=True)
         Path(current_dir, "current_queue").mkdir(exist_ok=True)
 
         # STEP 0 ── fetch lyrics
@@ -59,9 +57,13 @@ class SongDownloader(QRunnable):
         for attempt in range(1, self.max_retries + 1):
             print(f"📥 Download attempt {attempt}")
             try:
-                subprocess.run([
-                "spotdl", self.song_url
-                ], cwd=current_dir, check=True)
+                SpotiFLAC(
+                    url=self.song_url,
+                    output_dir=current_dir,
+                    services=["ext:tidal-web"],
+                    transcode_to="mp3",
+                    transcode_bitrate="320k",
+                )
             except subprocess.CalledProcessError:
                 continue
 
@@ -83,9 +85,15 @@ class SongDownloader(QRunnable):
         # move LRC to unique file
         # Count existing numbered folders in queue
         queue_dir = Path(current_dir) / "current_queue"
-        counter = sum(1 for f in queue_dir.iterdir() if f.is_dir()) + 1
+        # Highest slot in use + 1. Counting folders instead would reuse a number
+        # after a middle entry is deleted and overwrite a song still in the queue.
+        used = [int(f.name) for f in queue_dir.iterdir() if f.is_dir() and f.name.isdigit()]
+        counter = (max(used) + 1) if used else 1
         target_dir = queue_dir / str(counter)
         target_dir.mkdir(parents=True, exist_ok=True)
+
+        # The folder is just a slot number, so keep the real name beside it.
+        (target_dir / "title.txt").write_text(song_title, encoding="utf-8")
 
         # Move lyrics.lrc
         src_lrc = Path(current_dir) / "lyrics.lrc"
@@ -114,7 +122,7 @@ class SongDownloader(QRunnable):
             return
 
         wav_path = str(target_dir / "original"/"accompaniment.wav")
-        self.signals.finished.emit(str(counter), wav_path, str(dest_lrc))
+        self.signals.finished.emit(song_title, wav_path, str(dest_lrc))
 
 
 
@@ -334,14 +342,19 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("Kara_ok")
         self.setGeometry(500,250,800,600)
 
+        self.lyrics_font_size = None  # None -> scale with the window
+        self.lyrics_delay = 0         # ms, positive shows lyrics earlier
         self.lyrics = []  # Store list of (time_ms, text)
         self.current_lyric_index = 0
         self.music_queue = []
+        self.active_downloads = 0
         self.threadpool = QThreadPool()
         self.viewport=GLviewport(self)
+        self.setCentralWidget(self.viewport)
         self.music_player=QMediaPlayer(self)
         self.music_player.setVolume(50)
         self.music_player.positionChanged.connect(self.update_lyrics)
+        self.music_player.stateChanged.connect(self.on_state_change)
        
         self.toggle_btn=TrapezoidButton(self)
         self.toggle_btn.move(self.width()-self.toggle_btn.width(),int(self.height()/2)-50)
@@ -355,13 +368,15 @@ class MainWindow(QMainWindow):
 
         self.menu_width=300
         self.side_menu=QFrame(self)
-        self.side_menu.setGeometry(self.width(),0,self.menu_width,self.height())
+        self.side_menu.setGeometry(self.width(),self.menuBar().height(),self.menu_width,self.height())
         self.side_menu.setStyleSheet("background-color: #444;")
         
         self.add_button=QPushButton(self.side_menu)
         self.add_button.setText("+")
         self.link_field=QLineEdit(self.side_menu)
+        self.link_field.setPlaceholderText("Paste a Spotify track link")
         self.link_field.setStyleSheet("background-color:white;")
+        self.link_field.returnPressed.connect(self.on_add)
         self.add_button.clicked.connect(self.on_add)
 
         self.progress_bar = QProgressBar(self.side_menu)
@@ -369,6 +384,18 @@ class MainWindow(QMainWindow):
         self.progress_bar.hide()
 
         self.queue_list = QListWidget(self.side_menu)
+        self.queue_list.setTextElideMode(Qt.ElideRight)  # song names are long
+        self.queue_list.setStyleSheet("""
+        QListWidget {
+            background-color: #333;
+            color: white;
+            border: none;
+            outline: none;
+        }
+        QListWidget::item { padding: 6px 4px; }
+        QListWidget::item:selected { background-color: #666; }
+        QListWidget::item:hover { background-color: #555; }
+        """)
         self.queue_list.itemClicked.connect(self.load_from_queue)
 
         self.player_menu=QFrame(self)
@@ -443,8 +470,50 @@ class MainWindow(QMainWindow):
         self.menu_anim.setDuration(150)
         
         self.menu_visible=False
-        self.threadpool = QThreadPool()
+        self.build_menus()
         self.sync_queue_from_disk()
+
+    def build_menus(self):
+        options_menu = self.menuBar().addMenu("Options")
+
+        # Font size: "Auto" tracks the window, the rest are fixed pixel sizes.
+        font_menu = options_menu.addMenu("Lyrics Size")
+        font_group = QActionGroup(self)
+        font_group.setExclusive(True)
+        for label, size in [("Auto (fit window)", None), ("Small", 48),
+                            ("Medium", 72), ("Large", 96), ("Huge", 128)]:
+            action = font_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(size == self.lyrics_font_size)
+            action.triggered.connect(lambda checked, s=size: self.set_lyrics_font_size(s))
+            font_group.addAction(action)
+
+        # Offset: positive values pull the lyrics ahead of the audio.
+        offset_menu = options_menu.addMenu("Lyrics Offset")
+        offset_group = QActionGroup(self)
+        offset_group.setExclusive(True)
+        for label, ms in [("Later 500 ms", -500), ("Later 250 ms", -250),
+                          ("In sync", 0),
+                          ("Earlier 250 ms", 250), ("Earlier 500 ms", 500),
+                          ("Earlier 750 ms", 750), ("Earlier 1000 ms", 1000)]:
+            action = offset_menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(ms == self.lyrics_delay)
+            action.triggered.connect(lambda checked, d=ms: self.set_lyrics_delay(d))
+            offset_group.addAction(action)
+
+    def apply_lyrics_style(self):
+        size = self.lyrics_font_size or int(self.height() / 8)
+        self.lyric_window.setStyleSheet(f"color:white;font-size:{size}px;")
+
+    def set_lyrics_font_size(self, size):
+        self.lyrics_font_size = size
+        self.apply_lyrics_style()
+        print(f"🎵 Lyrics size set to {size or 'auto'}")
+
+    def set_lyrics_delay(self, delay_ms):
+        self.lyrics_delay = delay_ms
+        print(f"⏱ Lyrics offset set to {delay_ms}ms")
 
     def sync_queue_from_disk(self):
         self.queue_list.clear()
@@ -454,19 +523,28 @@ class MainWindow(QMainWindow):
         if not queue_dir.exists():
             return
         
-        for folder in sorted(queue_dir.iterdir(), key=lambda x: int(x.name)):
-            if not folder.is_dir():
-                continue
+        # Numbered slots first and in order, anything else last, never crashing.
+        def slot(folder):
+            return (0, int(folder.name)) if folder.name.isdigit() else (1, 0)
+
+        for folder in sorted((f for f in queue_dir.iterdir() if f.is_dir()), key=slot):
             wav_path = folder / "original" / "accompaniment.wav"
             lrc_path = folder / "lyrics.lrc"
             if not wav_path.exists():
                 continue
 
-            title = folder.name
-            item = QListWidgetItem(title)
-            item.setData(Qt.UserRole, (str(wav_path), str(lrc_path), str(folder)))
-            self.queue_list.addItem(item)
-            self.music_queue.append({"title": title, "wav": str(wav_path), "lrc": str(lrc_path)})
+            title_file = folder / "title.txt"
+            title = ""
+            if title_file.exists():
+                title = title_file.read_text(encoding="utf-8").strip()
+            self.add_queue_item(title or folder.name, str(wav_path), str(lrc_path), str(folder))
+
+    def add_queue_item(self, title, wav_path, lrc_path, folder_path):
+        item = QListWidgetItem(title)
+        item.setToolTip(title)  # the panel elides long names
+        item.setData(Qt.UserRole, (wav_path, lrc_path, folder_path))
+        self.queue_list.addItem(item)
+        self.music_queue.append({"title": title, "wav": wav_path, "lrc": lrc_path})
 
     def start_download(self, song_url):
         if not song_url:
@@ -475,36 +553,41 @@ class MainWindow(QMainWindow):
         downloader.signals.finished.connect(self.on_download_complete)
         downloader.signals.error.connect(self.on_download_error)
         self.threadpool.start(downloader)
+        self.active_downloads += 1
         self.progress_bar.show()
+        self.link_field.clear()
+
+    def download_finished(self):
+        # Keep the bar up while any other download is still running.
+        self.active_downloads = max(0, self.active_downloads - 1)
+        if self.active_downloads == 0:
+            self.progress_bar.hide()
 
     def on_download_error(self, msg):
         print(msg)
-        self.progress_bar.hide()
+        self.download_finished()
 
     def on_download_complete(self, title, wav_path, lrc_path):
-        self.progress_bar.hide()
-        item = QListWidgetItem(title)
-        folder_path = str(Path(wav_path).parent.parent)
-        item.setData(Qt.UserRole, (wav_path, lrc_path, folder_path))
-        self.queue_list.addItem(item)
-        self.music_queue.append({"title": title, "wav": wav_path, "lrc": lrc_path})
+        self.download_finished()
+        self.add_queue_item(title, wav_path, lrc_path, str(Path(wav_path).parent.parent))
         print(f"✅ Added '{title}' to queue.")
 
     def update_lyrics(self, pos):
         if not self.lyrics:
             return
 
-        # Handle backward scrubbing by resetting index
+        pos += self.lyrics_delay  # Apply delay
+
+        # backward scrub
         while self.current_lyric_index > 0 and self.lyrics[self.current_lyric_index][0] > pos:
             self.current_lyric_index -= 1
 
-        # Move forward if needed
+        # forward
         while (self.current_lyric_index + 1 < len(self.lyrics) and
                self.lyrics[self.current_lyric_index + 1][0] <= pos):
             self.current_lyric_index += 1
 
-        lyric_line = self.lyrics[self.current_lyric_index][1]
-        self.lyric_window.setText(lyric_line)
+        self.lyric_window.setText(self.lyrics[self.current_lyric_index][1])
 
     def load_from_queue(self, item):
         wav_path, lrc_path, _ = item.data(Qt.UserRole)
@@ -512,6 +595,7 @@ class MainWindow(QMainWindow):
 
         self.lyrics.clear()
         self.current_lyric_index = 0
+        self.lyric_window.setText("♪")
 
         try:
             with open(lrc_path, "r", encoding="utf-8") as f:
@@ -528,19 +612,25 @@ class MainWindow(QMainWindow):
                                 time_ms = int((minutes * 60 + seconds) * 1000)
                                 self.lyrics.append((time_ms, lyric_text))
             self.lyrics.sort()
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
+            pass
+
+        if not self.lyrics:
             self.lyric_window.setText("Lyrics not found.")
 
         self.music_player.play()
 
     def toggle_play(self):
-        self.isplaying=not (self.isplaying)
-        if(self.isplaying==False):
+        if self.music_player.state() == QMediaPlayer.PlayingState:
             self.music_player.pause()
-            self.play_button.setText("⏵")
         else:
             self.music_player.play()
-            self.play_button.setText("⏸")
+
+    def on_state_change(self, state):
+        # The button mirrors the player, so picking a song from the queue or a
+        # track ending on its own keeps the icon honest.
+        self.isplaying = state == QMediaPlayer.PlayingState
+        self.play_button.setText("⏸" if self.isplaying else "⏵")
 
     def on_add(self):
         self.start_download(self.link_field.text())
@@ -552,7 +642,8 @@ class MainWindow(QMainWindow):
 
     def on_position_change(self, pos):
         self.player_position = QTime(0, 0).addMSecs(pos)
-        self.play_slider.setValue(pos)
+        if not self.play_slider.isSliderDown():  # don't fight an active drag
+            self.play_slider.setValue(pos)
         self.update_play_time_label()
     
     def toggle_volume_slider(self):
@@ -586,12 +677,15 @@ class MainWindow(QMainWindow):
         self.menu_visible= not self.menu_visible
     
     def resizeEvent(self, event):
-        self.viewport.setGeometry(0,0,self.width(),self.height()-15)
+        # The panel is a child of the window, not the central widget, so it has
+        # to start below the menu bar or the menu bar covers its first row.
+        top = self.menuBar().height()
+        panel_height = self.height() - top
         if self.menu_visible:
-            self.side_menu.setGeometry(self.width() - self.menu_width, 0, self.menu_width, self.height())
+            self.side_menu.setGeometry(self.width() - self.menu_width, top, self.menu_width, panel_height)
             x = self.width() - self.menu_width - self.toggle_btn.width()
         else:
-            self.side_menu.setGeometry(self.width(), 0, self.menu_width, self.height())
+            self.side_menu.setGeometry(self.width(), top, self.menu_width, panel_height)
             x = self.width() - self.toggle_btn.width()
 
         self.toggle_btn.move(x, int(self.height() / 2) - self.toggle_btn.height() // 2)
@@ -600,14 +694,14 @@ class MainWindow(QMainWindow):
         self.play_slider.setGeometry(50,15,self.player_menu.width()-50-10-100-40,20)
         self.play_time.setGeometry(50+10+self.play_slider.width(),15,100,20)
         self.lyric_window.setGeometry((self.width() - int(self.width() * 2 / 3)) // 2,int((self.height()-self.player_height) / 4),int(self.width() * 2 / 3),int(self.height() / 2))
-        self.lyric_window.setStyleSheet(f"color:white;font-size:{int(self.height()/8)}px;")
+        self.apply_lyrics_style()
         self.volume_button.move(self.width() - 40, 10)
         self.volume_slider_frame.move(self.width() - 42, self.player_menu.y() - 123)
         self.toggle_btn.raise_()   
         self.link_field.setGeometry(0, 0, 250, 25)
         self.add_button.setGeometry(255, 0, 40, 25)
         self.progress_bar.setGeometry(0, 30, 295, 10)
-        self.queue_list.setGeometry(0, 45, 295, self.height() - 45)
+        self.queue_list.setGeometry(0, 45, 295, self.side_menu.height() - 45 - self.player_height)
         super().resizeEvent(event)
 
 

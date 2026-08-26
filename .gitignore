@@ -1,4 +1,23 @@
+# Environments
 venv310/
 node_modules/
+__pycache__/
+*.pyc
+
+# Secrets & machine-local config
+.env
 spotify-session.json
 pyrightconfig.json
+
+# Generated at runtime
+lyrics.json
+lyrics.lrc
+current_queue/
+pretrained_models/
+preprocessed.*
+*.mp3
+*.wav
+
+# Build output
+build/
+dist/
